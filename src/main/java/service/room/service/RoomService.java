@@ -26,8 +26,8 @@ public class RoomService {
     }
 
     @Transactional
-    public RoomResponse create(UUID conferenceId, RoomCreateRequest request) {
-        conferenceClient.ensureConferenceExists(conferenceId);
+    public RoomResponse create(UUID conferenceId, RoomCreateRequest request, String authHeader) {
+        conferenceClient.ensureConferenceExists(conferenceId, authHeader);
         String normalizedName = normalize(request.name());
         if (roomRepository.existsByConferenceIdAndNameIgnoreCase(conferenceId, normalizedName)) {
             throw new ConflictException("Ya existe una sala con ese nombre en la conferencia");
@@ -57,6 +57,14 @@ public class RoomService {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new NotFoundException("Sala no encontrada"));
         return RoomResponse.from(room);
+    }
+
+    @Transactional
+    public void delete(UUID roomId) {
+        if (!roomRepository.existsById(roomId)) {
+            throw new NotFoundException("Sala no encontrada");
+        }
+        roomRepository.deleteById(roomId);
     }
 
     private String normalize(String value) {

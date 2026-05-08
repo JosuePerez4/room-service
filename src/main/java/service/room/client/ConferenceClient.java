@@ -21,19 +21,20 @@ public class ConferenceClient {
         this.restClient = restClientBuilder.baseUrl(conferenceBaseUrl).build();
     }
 
-    public void ensureConferenceExists(UUID conferenceId) {
+    public void ensureConferenceExists(UUID conferenceId, String authorizationHeader) {
         try {
             restClient.get()
                     .uri("/conferences/get/{id}", conferenceId)
+                    .header("Authorization", authorizationHeader)
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientResponseException ex) {
             if (ex.getStatusCode() == HttpStatus.NOT_FOUND) {
                 throw new NotFoundException("La conferencia no existe");
             }
-            throw new IllegalArgumentException("No se pudo validar la conferencia");
+            throw ex;
         } catch (Exception ex) {
-            throw new IllegalArgumentException("No se pudo validar la conferencia");
+            throw new IllegalArgumentException("No se pudo validar la conferencia: " + ex.getMessage());
         }
     }
 }
