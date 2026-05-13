@@ -26,6 +26,26 @@ Flujo de creacion:
    mayusculas/minusculas.
 4. Guarda la sala y devuelve el recurso creado.
 
+### Dependencia con `conference-service`
+
+La unica dependencia sincronica del flujo de escritura es
+`ConferenceClient.ensureConferenceExists`:
+
+```http
+GET {CONFERENCE_SERVICE_URL}/conferences/get/{conferenceId}
+Authorization: <mismo header recibido en POST /rooms/conference/{conferenceId}>
+```
+
+- Un `404` de `conference-service` se transforma en `404 Not Found` local con el
+  mensaje `La conferencia no existe`.
+- Otros errores HTTP de `conference-service` no se traducen en el
+  `GlobalExceptionHandler`; se dejan al manejo por defecto de Spring.
+- Fallas de red, URL mal configurada o errores construyendo la llamada se
+  exponen como `400 Bad Request` con el prefijo
+  `No se pudo validar la conferencia:`.
+- Los endpoints de lectura (`GET /rooms/...`) y borrado no llaman a
+  `conference-service`.
+
 ## Requisitos
 
 - JDK 25, alineado con `pom.xml`.
@@ -70,6 +90,36 @@ Comandos utiles:
 La suite actual solo contiene una prueba de arranque de contexto
 (`RoomApplicationTests.contextLoads`), por lo que no reemplaza pruebas manuales
 del contrato REST ni de la integracion con PostgreSQL y `conference-service`.
+
+### Verificacion manual rapida
+
+Con PostgreSQL y `conference-service` levantados, crear una sala valida:
+
+```bash
+curl -i -X POST "http://localhost:${ROOM_SERVICE_PORT}/rooms/conference/<conference-uuid>" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token-opcional>" \
+  -d '{
+    "name": "Sala Principal",
+    "capacity": 120,
+    "type": "presencial",
+    "locationOrLink": "Edificio A - Auditorio",
+    "topicHints": "keynotes, apertura"
+  }'
+```
+
+Comprobar las reglas principales:
+
+```bash
+# Lista las salas persistidas para la conferencia, ordenadas por name ascendente.
+curl -i "http://localhost:${ROOM_SERVICE_PORT}/rooms/conference/<conference-uuid>"
+
+# Debe responder 409 si se repite el name en la misma conferencia sin importar mayusculas.
+curl -i -X POST "http://localhost:${ROOM_SERVICE_PORT}/rooms/conference/<conference-uuid>" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token-opcional>" \
+  -d '{"name":"sala principal","capacity":50,"type":"presencial","locationOrLink":"Auditorio"}'
+```
 
 ## API REST
 
@@ -135,7 +185,7 @@ Devuelve `204 No Content` si elimina la sala o `404 Not Found` si no existe.
 | Campo | Restricciones |
 | --- | --- |
 | `name` | Obligatorio, maximo 120 caracteres, se guarda sin espacios externos. Debe ser unico por conferencia sin distinguir mayusculas/minusculas. |
-| `capacity` | Minimo `1`. |
+| `capacity` | Minimo `1`. En la entidad y la tabla es no nulo; enviarlo siempre aunque el DTO solo declare `@Min`. |
 | `type` | Obligatorio, maximo 80 caracteres, se guarda sin espacios externos. |
 | `locationOrLink` | Obligatorio, maximo 255 caracteres, se guarda sin espacios externos. |
 | `topicHints` | Opcional, maximo 255 caracteres; valores en blanco se guardan como `null`. |
@@ -195,6 +245,23 @@ de Springdoc para inspeccionar el contrato generado, por ejemplo:
   header `Authorization` al crear la sala.
 - El servicio no valida la existencia de la conferencia al listar salas por
   `conferenceId`; solo filtra las salas existentes en su base de datos.
+- Los valores `name`, `type`, `locationOrLink` y `topicHints` se recortan con
+  `String.trim()` antes de persistir. Los controles `@Size` se aplican al JSON
+  recibido antes de ese recorte.
+- No existe una restriccion unica de base de datos para
+  `(conference_id, lower(name))`; la deteccion de duplicados vive en
+  `RoomService`. Si hay escrituras concurrentes para el mismo nombre, considerar
+  una migracion con indice unico funcional antes de usar el servicio con alta
+  concurrencia.
+
+## Troubleshooting
+
+| Sintoma | Causa probable | Verificacion |
+| --- | --- | --- |
+| La aplicacion no arranca y falla resolviendo placeholders | Falta `ROOM_DB_URL` o `ROOM_SERVICE_PORT` | Exportar variables o crear `.env` en la raiz del repo. |
+| `POST /rooms/conference/{id}` responde `400` con `No se pudo validar la conferencia` | `CONFERENCE_SERVICE_URL` apunta a una URL incorrecta, el servicio no esta disponible o la llamada no pudo construirse | Probar `GET ${CONFERENCE_SERVICE_URL}/conferences/get/{id}` desde el mismo entorno. |
+| `POST /rooms/conference/{id}` responde `404` con `La conferencia no existe` | `conference-service` devolvio `404` para el id enviado | Confirmar que el UUID existe en `conference-service` y que el token usado permite consultarlo. |
+| `POST` responde `409` aun cambiando mayusculas/minusculas | Ya existe una sala con el mismo `name` normalizado para la conferencia | Listar `GET /rooms/conference/{conferenceId}` y comparar nombres ignorando mayusculas. |
 
 ## Alcance de eventos
 
