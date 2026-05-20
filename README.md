@@ -28,7 +28,7 @@ Flujo de creacion:
 
 ## Requisitos
 
-- JDK 25, alineado con `pom.xml`.
+- JDK 21, alineado con `pom.xml`.
 - PostgreSQL accesible desde la aplicacion.
 - Maven Wrapper incluido en el repo (`./mvnw`).
 
@@ -50,6 +50,36 @@ Ejemplo local:
 ROOM_DB_URL=jdbc:postgresql://localhost:5432/rooms
 ROOM_SERVICE_PORT=8083
 CONFERENCE_SERVICE_URL=http://localhost:8082
+```
+
+## Arranque local
+
+1. Crear la base de datos PostgreSQL referenciada por `ROOM_DB_URL`.
+2. Exportar las variables anteriores o guardarlas en `.env` en la raiz del
+   repositorio.
+3. Levantar `conference-service` o configurar `CONFERENCE_SERVICE_URL` hacia un
+   ambiente disponible. La creacion de salas depende de
+   `GET /conferences/get/{id}`.
+4. Iniciar el servicio:
+
+```bash
+./mvnw spring-boot:run
+```
+
+Smoke test con una conferencia existente. Omite la linea `Authorization` si
+`conference-service` no la requiere:
+
+```bash
+curl -i -X POST "http://localhost:${ROOM_SERVICE_PORT}/rooms/conference/<conference-id>" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token-opcional>" \
+  -d '{
+    "name": "Sala Principal",
+    "capacity": 120,
+    "type": "presencial",
+    "locationOrLink": "Edificio A - Auditorio",
+    "topicHints": "keynotes, apertura"
+  }'
 ```
 
 ## Ejecucion y verificacion
@@ -135,7 +165,7 @@ Devuelve `204 No Content` si elimina la sala o `404 Not Found` si no existe.
 | Campo | Restricciones |
 | --- | --- |
 | `name` | Obligatorio, maximo 120 caracteres, se guarda sin espacios externos. Debe ser unico por conferencia sin distinguir mayusculas/minusculas. |
-| `capacity` | Minimo `1`. |
+| `capacity` | Debe enviarse siempre; minimo `1`. |
 | `type` | Obligatorio, maximo 80 caracteres, se guarda sin espacios externos. |
 | `locationOrLink` | Obligatorio, maximo 255 caracteres, se guarda sin espacios externos. |
 | `topicHints` | Opcional, maximo 255 caracteres; valores en blanco se guardan como `null`. |
@@ -171,8 +201,9 @@ Codigos relevantes:
 - `404 Not Found`: sala inexistente o conferencia inexistente al crear.
 - `409 Conflict`: ya existe una sala con el mismo nombre en la conferencia.
 
-Otros errores HTTP devueltos por `conference-service` durante la validacion se
-propagan como errores del cliente HTTP de Spring.
+Los `404` devueltos por `conference-service` se convierten en `La conferencia
+no existe`. Otros errores HTTP de esa dependencia no tienen mapeo de dominio
+propio en este servicio.
 
 ## OpenAPI
 
@@ -192,9 +223,21 @@ de Springdoc para inspeccionar el contrato generado, por ejemplo:
   la aplicacion no puede arrancar correctamente.
 - La creacion de salas depende de que `conference-service` responda a
   `/conferences/get/{id}`. Si ese servicio requiere autenticacion, enviar el
-  header `Authorization` al crear la sala.
+  header `Authorization` al crear la sala; el header solo se reenvia en el
+  endpoint `POST /rooms/conference/{conferenceId}`.
 - El servicio no valida la existencia de la conferencia al listar salas por
   `conferenceId`; solo filtra las salas existentes en su base de datos.
+- `capacity` no tiene valor por defecto: los clientes deben enviarlo siempre
+  con un entero mayor o igual a `1`.
+
+### Troubleshooting rapido
+
+| Sintoma | Causa probable | Accion |
+| --- | --- | --- |
+| Falla el arranque con errores de datasource o placeholders. | Falta `ROOM_DB_URL` o `ROOM_SERVICE_PORT`. | Exportar las variables o agregarlas al `.env` cargado por `spring.config.import`. |
+| `POST /rooms/conference/{id}` devuelve `404` con `La conferencia no existe`. | `conference-service` respondio `404` para `GET /conferences/get/{id}`. | Verificar que el `conferenceId` exista y que `CONFERENCE_SERVICE_URL` apunte al servicio correcto. |
+| `POST /rooms/conference/{id}` devuelve `400` con `No se pudo validar la conferencia`. | El cliente HTTP no pudo completar la validacion, por ejemplo por URL incorrecta o servicio caido. | Revisar conectividad hacia `CONFERENCE_SERVICE_URL` y logs de ambos servicios. |
+| `POST /rooms/conference/{id}` devuelve `409`. | Ya existe una sala con el mismo `name` en la conferencia, ignorando mayusculas/minusculas. | Elegir otro nombre o reutilizar la sala existente. |
 
 ## Alcance de eventos
 
