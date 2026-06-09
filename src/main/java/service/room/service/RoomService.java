@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import service.room.client.ConferenceClient;
+import service.room.client.RegistrationClient;
+import service.room.dto.RoomAccessResponse;
 import service.room.dto.RoomCreateRequest;
 import service.room.dto.RoomResponse;
 import service.room.exception.ConflictException;
@@ -19,10 +21,15 @@ public class RoomService {
 
     private final RoomRepository roomRepository;
     private final ConferenceClient conferenceClient;
+    private final RegistrationClient registrationClient;
 
-    public RoomService(RoomRepository roomRepository, ConferenceClient conferenceClient) {
+    public RoomService(
+            RoomRepository roomRepository,
+            ConferenceClient conferenceClient,
+            RegistrationClient registrationClient) {
         this.roomRepository = roomRepository;
         this.conferenceClient = conferenceClient;
+        this.registrationClient = registrationClient;
     }
 
     @Transactional
@@ -65,6 +72,14 @@ public class RoomService {
             throw new NotFoundException("Sala no encontrada");
         }
         roomRepository.deleteById(roomId);
+    }
+
+    @Transactional(readOnly = true)
+    public RoomAccessResponse enterRoom(UUID roomId, String authHeader) {
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new NotFoundException("Sala no encontrada"));
+        registrationClient.ensureUserHasActiveRegistration(room.getConferenceId(), authHeader);
+        return RoomAccessResponse.from(room);
     }
 
     private String normalize(String value) {

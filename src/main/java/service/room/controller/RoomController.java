@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
+import service.room.dto.RoomAccessResponse;
 import service.room.dto.RoomCreateRequest;
 import service.room.dto.RoomResponse;
 import service.room.service.RoomService;
@@ -44,5 +45,12 @@ public class RoomController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID roomId) {
         roomService.delete(roomId);
+    }
+
+    @GetMapping("/{roomId}/enter")
+    public RoomAccessResponse enter(
+            @PathVariable UUID roomId,
+            @RequestHeader(value = "Authorization") String authHeader) {
+        return roomService.enterRoom(roomId, authHeader);
     }
 }
