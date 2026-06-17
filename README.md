@@ -28,7 +28,7 @@ Flujo de creacion:
 
 ## Requisitos
 
-- JDK 25, alineado con `pom.xml`.
+- JDK 21, alineado con `pom.xml` y la imagen base del `Dockerfile`.
 - PostgreSQL accesible desde la aplicacion.
 - Maven Wrapper incluido en el repo (`./mvnw`).
 
@@ -42,6 +42,7 @@ las variables en el entorno.
 | --- | --- | --- |
 | `ROOM_DB_URL` | Si | URL JDBC de PostgreSQL usada por `spring.datasource.url`. |
 | `ROOM_SERVICE_PORT` | Si | Puerto HTTP donde se levanta el servicio. |
+| `EUREKA_SERVER_URL` | Si | URL del servidor Eureka usada por `eureka.client.service-url.defaultZone`. |
 | `CONFERENCE_SERVICE_URL` | No | Base URL de `conference-service`; por defecto `http://localhost:8082`. |
 
 Ejemplo local:
@@ -49,8 +50,28 @@ Ejemplo local:
 ```properties
 ROOM_DB_URL=jdbc:postgresql://localhost:5432/rooms
 ROOM_SERVICE_PORT=8083
+EUREKA_SERVER_URL=http://localhost:8761/eureka/
 CONFERENCE_SERVICE_URL=http://localhost:8082
 ```
+
+### Registro en Eureka
+
+El servicio incluye `spring-cloud-starter-netflix-eureka-client` y se registra
+con `spring.application.name=room`. La propiedad
+`eureka.instance.prefer-ip-address=true` hace que Eureka publique la direccion IP
+de la instancia. Si `EUREKA_SERVER_URL` no esta definido, la aplicacion no puede
+resolver `eureka.client.service-url.defaultZone` durante el arranque.
+
+### Actuator
+
+Solo se exponen los endpoints Actuator configurados en
+`management.endpoints.web.exposure.include=health,info`:
+
+- `/actuator/health`
+- `/actuator/info`
+
+`management.endpoint.health.probes.enabled=true` habilita grupos de salud para
+probes cuando el entorno de despliegue los usa.
 
 ## Ejecucion y verificacion
 
@@ -70,6 +91,26 @@ Comandos utiles:
 La suite actual solo contiene una prueba de arranque de contexto
 (`RoomApplicationTests.contextLoads`), por lo que no reemplaza pruebas manuales
 del contrato REST ni de la integracion con PostgreSQL y `conference-service`.
+
+### Imagen Docker
+
+El `Dockerfile` compila el jar con Maven sobre Temurin 21 y ejecuta la aplicacion
+con una imagen JRE Temurin 21. El contenedor corre como usuario `app`.
+
+```bash
+docker build -t room-service .
+docker run --rm \
+  -e ROOM_DB_URL=jdbc:postgresql://host.docker.internal:5432/rooms \
+  -e ROOM_SERVICE_PORT=8085 \
+  -e EUREKA_SERVER_URL=http://host.docker.internal:8761/eureka/ \
+  -e CONFERENCE_SERVICE_URL=http://host.docker.internal:8082 \
+  -p 8085:8085 \
+  room-service
+```
+
+El `EXPOSE 8085` del `Dockerfile` es metadato de la imagen; el puerto real de
+Spring Boot lo define `ROOM_SERVICE_PORT`, por lo que el puerto publicado debe
+coincidir con ese valor.
 
 ## API REST
 
@@ -190,6 +231,8 @@ de Springdoc para inspeccionar el contrato generado, por ejemplo:
   en ambientes donde las migraciones deban ser controladas.
 - `ROOM_DB_URL` y `ROOM_SERVICE_PORT` no tienen valores por defecto; si faltan,
   la aplicacion no puede arrancar correctamente.
+- `EUREKA_SERVER_URL` tampoco tiene valor por defecto. Para ejecuciones locales
+  sin servidor Eureka, ajustar la configuracion antes de arrancar el servicio.
 - La creacion de salas depende de que `conference-service` responda a
   `/conferences/get/{id}`. Si ese servicio requiere autenticacion, enviar el
   header `Authorization` al crear la sala.
